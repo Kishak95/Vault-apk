@@ -1,7 +1,10 @@
 package com.example.vaultapp
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -11,7 +14,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.ValueCallback
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewAssetLoader.AssetsPathHandler
 import androidx.webkit.WebViewClientCompat
@@ -23,6 +28,17 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uris: Array<Uri>? = if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { arrayOf(it) }
+        } else null
+        fileChooserCallback?.onReceiveValue(uris)
+        fileChooserCallback = null
+    }
 
     /** JavaScript interface exposed to the WebView as window.Android */
     inner class AndroidBridge {
@@ -79,8 +95,24 @@ class MainActivity : ComponentActivity() {
         // Expose Android bridge to JavaScript as window.Android
         webView.addJavascriptInterface(AndroidBridge(), "Android")
 
-        // Let the web app use clipboard prompts, alerts, etc.
-        webView.webChromeClient = WebChromeClient()
+        // Let the web app use clipboard, alerts, and file picker
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: FileChooserParams
+            ): Boolean {
+                // cancel any previous callback
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = callback
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "application/json"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                }
+                filePickerLauncher.launch(intent)
+                return true
+            }
+        }
 
         // Intercept requests so assetLoader can serve /assets/*
         webView.webViewClient = object : WebViewClientCompat() {
