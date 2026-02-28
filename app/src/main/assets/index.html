@@ -335,6 +335,10 @@ input[type=range]::-webkit-slider-thumb {
 #toast.show { opacity:1; }
 
 /* ── DRAG REORDER ── */
+[data-draggable] {
+  -webkit-user-select: none;
+  user-select: none;
+}
 .drag-ghost {
   position: fixed; z-index: 9000; pointer-events: none;
   opacity: 0.92;
@@ -809,6 +813,10 @@ function switchTab(tab) {
 // ═══════════════════════════════════════════════════
 function onLenChange(v) {
   document.getElementById('lenVal').textContent = v;
+  const slider = document.getElementById('lenSlider');
+  const min = parseInt(slider.min), max = parseInt(slider.max);
+  const pct = ((v - min) / (max - min)) * 100;
+  slider.style.background = `linear-gradient(to right, #4C1D95 0%, #4C1D95 ${pct}%, rgba(255,255,255,0.15) ${pct}%, rgba(255,255,255,0.15) 100%)`;
 }
 
 function doGenerate() {
@@ -1386,6 +1394,7 @@ function makeDraggable(container, getItems, onReorder) {
     // find the draggable item
     const item = e.target.closest('[data-draggable]');
     if (!item) return;
+    e.stopPropagation();
     startPress(e, item);
   }, { passive: true });
 
@@ -1447,6 +1456,7 @@ function initAccountsDrag() {
 
 
 init();
+onLenChange(document.getElementById('lenSlider').value);
 </script>
 </body>
 </html>
