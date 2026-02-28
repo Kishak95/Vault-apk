@@ -342,10 +342,10 @@ input[type=range]::-webkit-slider-thumb {
 .drag-ghost {
   position: fixed; z-index: 9000; pointer-events: none;
   opacity: 0.92;
-  transform: rotate(3deg) scale(1.03);
   box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 2px var(--accent);
   border-radius: var(--radius);
   transition: none;
+  will-change: transform;
 }
 .drag-placeholder {
   opacity: 0.25;
@@ -771,8 +771,6 @@ function showApp() {
   document.getElementById('app').classList.add('visible');
   document.getElementById('masterInput').value = '';
   renderVault(); renderNotes(); updateStats();
-  initServicesDrag();
-  initNotesDrag();
 }
 
 function lockApp() {
@@ -1266,8 +1264,16 @@ function toggleEye(inputId, btn) {
   btn.textContent = inp.type === 'password' ? '👁' : '🙈';
 }
 
+let _clipTimer;
 function copyText(text, label) {
-  navigator.clipboard.writeText(text).then(() => toast(label + ' copied!'));
+  navigator.clipboard.writeText(text).then(() => {
+    toast(label + ' copied! Clears in 30s');
+    clearTimeout(_clipTimer);
+    _clipTimer = setTimeout(() => {
+      navigator.clipboard.writeText('').catch(() => {});
+      toast('Clipboard cleared');
+    }, 30000);
+  });
 }
 
 let _toastTimer;
@@ -1296,12 +1302,14 @@ function uid() {
 const LONG_PRESS_MS = 500;
 
 function makeDraggable(container, getItems, onReorder) {
-  let pressTimer = null;
-  let dragging   = null;   // the real DOM element being dragged
-  let ghost      = null;   // floating clone
-  let offsetX    = 0, offsetY = 0;
-  let startX     = 0, startY = 0;
-  let moved      = false;
+  let pressTimer  = null;
+  let dragging    = null;
+  let ghost       = null;
+  let cachedItems = null;   // cached at drag start
+  let ghostStartX = 0, ghostStartY = 0;
+  let startX      = 0, startY = 0;
+  let moved       = false;
+  let blockClick  = false;
 
   function startPress(e, el) {
     moved = false;
@@ -1315,21 +1323,21 @@ function makeDraggable(container, getItems, onReorder) {
 
   function beginDrag(el, touch) {
     dragging = el;
+    cachedItems = getItems();
     const rect = el.getBoundingClientRect();
-    offsetX = touch.clientX - rect.left;
-    offsetY = touch.clientY - rect.top;
+    ghostStartX = rect.left;
+    ghostStartY = rect.top;
 
-    // create ghost clone
     ghost = el.cloneNode(true);
     ghost.classList.add('drag-ghost');
-    ghost.style.width  = rect.width + 'px';
-    ghost.style.top    = (touch.clientY - offsetY) + 'px';
-    ghost.style.left   = (touch.clientX - offsetX) + 'px';
+    ghost.style.width     = rect.width + 'px';
+    ghost.style.left      = rect.left + 'px';
+    ghost.style.top       = rect.top + 'px';
+    ghost.style.transform = 'rotate(3deg) scale(1.03)';
+    ghost.style.willChange = 'transform';
     document.body.appendChild(ghost);
 
     el.classList.add('drag-placeholder');
-
-    // vibrate if available
     if (navigator.vibrate) navigator.vibrate(40);
   }
 
@@ -1344,13 +1352,14 @@ function makeDraggable(container, getItems, onReorder) {
     if (!dragging) return;
     e.preventDefault();
 
-    ghost.style.top  = (touch.clientY - offsetY) + 'px';
-    ghost.style.left = (touch.clientX - offsetX) + 'px';
+    // GPU-accelerated positioning via transform
+    const tx = touch.clientX - startX;
+    const ty = touch.clientY - startY;
+    ghost.style.transform = `translate(${tx}px, ${ty}px) rotate(3deg) scale(1.03)`;
 
-    // highlight insertion target
-    const items = getItems();
-    items.forEach(item => item.classList.remove('drag-over'));
-    const target = getTargetItem(touch, items);
+    // highlight insertion target using cached items
+    cachedItems.forEach(item => item.classList.remove('drag-over'));
+    const target = getTargetItem(touch, cachedItems);
     if (target && target !== dragging) target.classList.add('drag-over');
   }
 
@@ -1359,26 +1368,27 @@ function makeDraggable(container, getItems, onReorder) {
     if (!dragging) return;
 
     const touch = e.changedTouches ? e.changedTouches[0] : e;
-    const items = getItems();
-    items.forEach(item => item.classList.remove('drag-over'));
+    cachedItems.forEach(item => item.classList.remove('drag-over'));
 
-    const target = getTargetItem(touch, items);
+    const target = getTargetItem(touch, cachedItems);
     if (target && target !== dragging) {
-      // find indices
-      const arr = Array.from(items);
-      const fromIdx = arr.indexOf(dragging);
-      const toIdx   = arr.indexOf(target);
+      const fromIdx = cachedItems.indexOf(dragging);
+      const toIdx   = cachedItems.indexOf(target);
       onReorder(fromIdx, toIdx);
     }
 
     dragging.classList.remove('drag-placeholder');
     ghost.remove();
-    dragging = null;
-    ghost    = null;
+    dragging    = null;
+    ghost       = null;
+    cachedItems = null;
+
+    // block the synthetic click that fires after touchend
+    blockClick = true;
+    setTimeout(() => { blockClick = false; }, 300);
   }
 
   function getTargetItem(touch, items) {
-    // temporarily hide ghost so elementFromPoint works
     if (ghost) ghost.style.display = 'none';
     const el = document.elementFromPoint(touch.clientX, touch.clientY);
     if (ghost) ghost.style.display = '';
@@ -1389,9 +1399,7 @@ function makeDraggable(container, getItems, onReorder) {
     return null;
   }
 
-  // Attach listeners to container (event delegation)
   container.addEventListener('touchstart', e => {
-    // find the draggable item
     const item = e.target.closest('[data-draggable]');
     if (!item) return;
     e.stopPropagation();
@@ -1399,13 +1407,18 @@ function makeDraggable(container, getItems, onReorder) {
   }, { passive: true });
 
   container.addEventListener('touchmove', onMove, { passive: false });
-  container.addEventListener('touchend',  onEnd);
+  container.addEventListener('touchend', onEnd);
   container.addEventListener('touchcancel', () => {
     clearTimeout(pressTimer);
     if (dragging) dragging.classList.remove('drag-placeholder');
     if (ghost)    ghost.remove();
-    dragging = null; ghost = null;
+    dragging = null; ghost = null; cachedItems = null;
   });
+
+  // suppress the post-drag synthetic click
+  container.addEventListener('click', e => {
+    if (blockClick) e.stopPropagation();
+  }, true);
 }
 
 // ── Wire up Services drag
@@ -1457,6 +1470,8 @@ function initAccountsDrag() {
 
 init();
 onLenChange(document.getElementById('lenSlider').value);
+initServicesDrag();
+initNotesDrag();
 </script>
 </body>
 </html>
