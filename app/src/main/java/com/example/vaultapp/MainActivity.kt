@@ -9,11 +9,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.webkit.ValueCallback
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,6 +73,13 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Block screenshots and recent apps thumbnail
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
@@ -114,10 +121,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Intercept requests so assetLoader can serve /assets/*
+        // Intercept requests — serve local assets, block external URLs in WebView
         webView.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest)
                 = assetLoader.shouldInterceptRequest(request.url)
+
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val host = request.url.host ?: return true
+                if (host == "appassets.androidplatform.net") return false
+                // Open any external URL in system browser instead of WebView
+                val intent = Intent(Intent.ACTION_VIEW, request.url)
+                startActivity(intent)
+                return true
+            }
         }
 
         // Enable service worker to also load from assetLoader (for offline caching logic in sw.js)
@@ -134,6 +150,14 @@ class MainActivity : ComponentActivity() {
         // Load the app
         if (savedInstanceState == null) {
             webView.loadUrl("https://appassets.androidplatform.net/assets/index.html")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Auto-lock vault when app goes to background
+        if (this::webView.isInitialized) {
+            webView.evaluateJavascript("if(typeof lockApp==='function')lockApp();", null)
         }
     }
 
