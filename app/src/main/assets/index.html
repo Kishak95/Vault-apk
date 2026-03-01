@@ -865,7 +865,7 @@ function switchTab(tab, animate) {
     swipeStartY = e.touches[0].clientY;
     swipeStartTime = Date.now();
     swipeActive = true;
-  }, { passive: true });
+  }, { passive: true, capture: true });
 
   area.addEventListener('touchend', e => {
     if (!swipeActive) return;
@@ -881,7 +881,7 @@ function switchTab(tab, animate) {
     } else if (dx > 0 && currentTabIdx > 0) {
       switchTab(TABS[currentTabIdx - 1]);
     }
-  }, { passive: true });
+  }, { passive: true, capture: true });
 })();
 
 // ═══════════════════════════════════════════════════
