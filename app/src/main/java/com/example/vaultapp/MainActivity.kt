@@ -290,7 +290,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onPause() {
         super.onPause()
         if (pageLoaded && this::webView.isInitialized) {
-            // Lock the vault — lockApp() in JS will call notifyLocked() back
+            vaultLocked = true  // set immediately — don't wait for JS async chain
             webView.evaluateJavascript("if(typeof lockApp==='function')lockApp();", null)
         }
     }
