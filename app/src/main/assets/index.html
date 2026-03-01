@@ -746,6 +746,7 @@ async function handleLock() {
     masterPw   = pw;
     vaultData  = { services:[], notes:[] };
     await saveVault();
+    if (window.Android) window.Android.storeMasterKey(pw);
     showApp();
   } else {
     const btn = document.getElementById('lockBtn');
@@ -754,12 +755,26 @@ async function handleLock() {
       const raw = localStorage.getItem(STORAGE_KEY);
       vaultData = await decryptData(JSON.parse(raw), pw);
       masterPw  = pw;
+      if (window.Android) window.Android.storeMasterKey(pw);
       showApp();
     } catch(e) {
       err.textContent = 'Wrong password. Try again.';
     } finally {
       btn.textContent = 'Unlock Vault'; btn.disabled = false;
     }
+  }
+}
+
+// Called by native biometric on successful fingerprint/face auth
+async function unlockWithPassword(pw) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    vaultData = await decryptData(JSON.parse(raw), pw);
+    masterPw  = pw;
+    showApp();
+  } catch(e) {
+    document.getElementById('lockErr').textContent = 'Biometric unlock failed. Enter password.';
   }
 }
 
@@ -1113,6 +1128,7 @@ async function doChangePw() {
   if (nw !== con)        { err.textContent = 'Passwords do not match.'; return; }
   masterPw = nw;
   await saveVault();
+  if (window.Android) window.Android.storeMasterKey(nw);
   closeModal('modal-chpw');
   toast('Master password changed');
 }
