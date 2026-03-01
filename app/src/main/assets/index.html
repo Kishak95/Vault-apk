@@ -810,6 +810,10 @@ function lockApp() {
     document.getElementById('masterInput').value = '';
     isNewVault = false;
     init();
+    // Trigger biometric prompt after locking
+    if (window.Android && window.Android.showBiometric) {
+      setTimeout(() => window.Android.showBiometric(), 300);
+    }
   });
 }
 
