@@ -113,6 +113,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private var isBiometricShowing = false
+    private var vaultLocked = false
 
     // ── Biometric prompt ────────────────────────────────────────────────────
 
@@ -127,6 +128,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     isBiometricShowing = false
+                    vaultLocked = false
                     val pw = decryptStored() ?: return
                     val pwJson = JSONObject.quote(pw)
                     webView.evaluateJavascript("unlockWithPassword($pwJson);", null)
@@ -179,8 +181,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
 
         @JavascriptInterface
-        fun showBiometric() {
-            // Called from JS lockApp() — post to main thread since JS interface runs on background thread
+        fun notifyLocked() {
+            // Called from JS lockApp() — vault just locked, trigger biometric
+            vaultLocked = true
             ContextCompat.getMainExecutor(this@MainActivity).execute {
                 if (hasStoredKey()) showBiometricPrompt()
             }
@@ -188,6 +191,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         @JavascriptInterface
         fun storeMasterKey(pw: String) {
+            vaultLocked = false
             encryptAndStore(pw)
         }
 
@@ -275,18 +279,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Trigger biometric when returning from background (page already loaded)
-        if (pageLoaded && hasStoredKey()) {
-            // Small delay to let onPause's lockApp() finish executing in JS first
-            webView.postDelayed({ showBiometricPrompt() }, 300)
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Fires when app regains focus after background or after biometric dialog dismisses
+        if (hasFocus && pageLoaded && vaultLocked && hasStoredKey()) {
+            showBiometricPrompt()
         }
     }
 
     override fun onPause() {
         super.onPause()
         if (pageLoaded && this::webView.isInitialized) {
+            // Lock the vault — lockApp() in JS will call notifyLocked() back
             webView.evaluateJavascript("if(typeof lockApp==='function')lockApp();", null)
         }
     }
