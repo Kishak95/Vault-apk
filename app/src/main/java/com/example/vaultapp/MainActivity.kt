@@ -112,21 +112,31 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             .getString(PREF_ENC_PW, null) != null
     }
 
+    private var isBiometricShowing = false
+
     // ── Biometric prompt ────────────────────────────────────────────────────
 
     private fun showBiometricPrompt() {
         val bm = BiometricManager.from(this)
         if (bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             != BiometricManager.BIOMETRIC_SUCCESS) return
+        if (isBiometricShowing) return
 
+        isBiometricShowing = true
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    isBiometricShowing = false
                     val pw = decryptStored() ?: return
                     val pwJson = JSONObject.quote(pw)
                     webView.evaluateJavascript("unlockWithPassword($pwJson);", null)
                 }
-                // on cancel or error — lock screen stays, user types password
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    isBiometricShowing = false
+                }
+                override fun onAuthenticationFailed() {
+                    isBiometricShowing = false
+                }
             }
         )
 
@@ -165,6 +175,14 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             } catch (e: Exception) {
                 "Export failed: ${e.message}"
+            }
+        }
+
+        @JavascriptInterface
+        fun showBiometric() {
+            // Called from JS lockApp() — post to main thread since JS interface runs on background thread
+            ContextCompat.getMainExecutor(this@MainActivity).execute {
+                if (hasStoredKey()) showBiometricPrompt()
             }
         }
 
@@ -254,6 +272,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         if (savedInstanceState == null) {
             webView.loadUrl("https://appassets.androidplatform.net/assets/index.html")
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Trigger biometric when returning from background (page already loaded)
+        if (pageLoaded && hasStoredKey()) {
+            // Small delay to let onPause's lockApp() finish executing in JS first
+            webView.postDelayed({ showBiometricPrompt() }, 300)
         }
     }
 
